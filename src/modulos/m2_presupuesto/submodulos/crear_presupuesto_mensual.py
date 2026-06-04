@@ -198,6 +198,40 @@ def listar_grupos() -> list[str]:
         con.close()
 
 
+def mensualizar_aprobado(
+    df_calculado: pd.DataFrame,
+    aprobado_por_grupo_pesos: dict[str, float],
+) -> pd.DataFrame:
+    """Reescala movimientos por grupo para que coincidan con el aprobado anual.
+
+    Para cada grupo con valor aprobado:
+       factor = |aprobado_pesos| / |sum(movimiento_calculado)|
+       movimiento_final = movimiento_calculado * factor   (preserva signo)
+
+    Grupos sin aprobado se dejan tal cual.
+    Grupos con calculado = 0 se ignoran (no se puede reescalar).
+    """
+    if not aprobado_por_grupo_pesos or df_calculado.empty:
+        return df_calculado.copy()
+
+    df = df_calculado.copy()
+    totales_abs = df.groupby("grupo")["movimiento"].sum().abs()
+
+    factores: dict[str, float] = {}
+    for grupo, aprobado in aprobado_por_grupo_pesos.items():
+        total_abs = totales_abs.get(grupo, 0)
+        if total_abs == 0 or aprobado is None:
+            continue
+        factores[grupo] = abs(float(aprobado)) / float(total_abs)
+
+    if not factores:
+        return df
+
+    df["__factor"] = df["grupo"].map(factores).fillna(1.0)
+    df["movimiento"] = df["movimiento"] * df["__factor"]
+    return df.drop(columns="__factor")
+
+
 def pivot_mensual_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
     """Pivot: filas = grupo, columnas = Ene..Dic, valores = SUM(movimiento).
 
