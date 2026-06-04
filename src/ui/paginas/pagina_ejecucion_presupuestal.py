@@ -202,11 +202,13 @@ class PaginaEjecucionPresupuestal(QWidget):
         num_cols = {str(c) for c in anio_cols}
         pct_cols_s = {str(c) for c in pct_cols}
         delta_cols_s = {str(c) for c in delta_cols}
+        filas_exc = set(display.index[display["grupo"] == "Excedente"].tolist())
         self.tabla.setModel(PandasModel(
             display,
             columnas_numericas=num_cols,
             columnas_porcentaje=pct_cols_s,
             columnas_delta=delta_cols_s,
+            filas_destacadas=filas_exc,
         ))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), 280))

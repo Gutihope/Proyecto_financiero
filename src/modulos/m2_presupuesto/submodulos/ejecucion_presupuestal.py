@@ -308,7 +308,50 @@ def obtener_ejecucion_pivot(
             presupuesto_por_anio=presupuesto_por_anio,
             incluir_variaciones=incluir_variaciones,
         )
+
+    pivot = _agregar_fila_excedente(pivot, anios)
     return pivot
+
+
+def _agregar_fila_excedente(pivot: pd.DataFrame, anios: list[int]) -> pd.DataFrame:
+    """Agrega una fila al final con el Excedente (sumatoria de todos los grupos).
+
+    - Columnas de año: suma cruda (raw signed). En P&L queda + si hubo utilidad.
+    - %Δ y Δ entre años: recomputa usando magnitudes de los excedentes totales.
+    - %Año y %Mes: vacíos (el excedente combina ingresos y gastos, comparar contra
+      presupuesto requeriría definir el "excedente aprobado" — sin claridad aún).
+    """
+    if pivot.empty or "grupo" not in pivot.columns:
+        return pivot
+
+    fila: dict = {"grupo": "Excedente"}
+
+    for anio in anios:
+        if anio in pivot.columns:
+            fila[anio] = float(pivot[anio].sum())
+    if "Total" in pivot.columns:
+        fila["Total"] = float(pivot["Total"].sum())
+
+    if len(anios) >= 2:
+        for i in range(1, len(anios)):
+            prev = anios[i - 1]
+            curr = anios[i]
+            col_pct = f"%Δ {prev}→{curr}"
+            col_abs = f"Δ {prev}→{curr}"
+            prev_abs = abs(fila.get(prev, 0.0))
+            curr_abs = abs(fila.get(curr, 0.0))
+            if col_pct in pivot.columns:
+                fila[col_pct] = ((curr_abs - prev_abs) / prev_abs * 100
+                                 if prev_abs > 0 else np.nan)
+            if col_abs in pivot.columns:
+                fila[col_abs] = curr_abs - prev_abs
+
+    for col in pivot.columns:
+        if isinstance(col, str) and (col.startswith("%Año") or col.startswith("%Mes")):
+            fila[col] = np.nan
+
+    fila_df = pd.DataFrame([fila]).reindex(columns=pivot.columns)
+    return pd.concat([pivot, fila_df], ignore_index=True)
 
 
 def exportar_ejecucion_excel(pivot: pd.DataFrame, ruta: Path) -> Path:

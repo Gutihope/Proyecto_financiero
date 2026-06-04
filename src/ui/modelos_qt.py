@@ -1,6 +1,7 @@
 """Adaptadores Qt para mostrar DataFrames en QTableView."""
 import pandas as pd
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QBrush, QColor, QFont
 
 
 class PandasModel(QAbstractTableModel):
@@ -10,12 +11,14 @@ class PandasModel(QAbstractTableModel):
         columnas_numericas: set[str] | None = None,
         columnas_porcentaje: set[str] | None = None,
         columnas_delta: set[str] | None = None,
+        filas_destacadas: set[int] | None = None,
     ):
         super().__init__()
         self._df = df
         self._num_cols = columnas_numericas or set()
         self._pct_cols = columnas_porcentaje or set()
         self._delta_cols = columnas_delta or set()
+        self._filas_destacadas = filas_destacadas or set()
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._df)
@@ -71,6 +74,14 @@ class PandasModel(QAbstractTableModel):
             except (TypeError, ValueError):
                 return None
             return None
+
+        if role == Qt.FontRole and index.row() in self._filas_destacadas:
+            f = QFont()
+            f.setBold(True)
+            return f
+
+        if role == Qt.BackgroundRole and index.row() in self._filas_destacadas:
+            return QBrush(QColor("#fff5d6"))
 
         return None
 
