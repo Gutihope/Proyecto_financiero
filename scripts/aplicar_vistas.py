@@ -17,17 +17,19 @@ def main():
         aplicar_sql_dir(con, "sql")
 
         print("\n" + "=" * 80)
-        print("Sample: presupuesto.vw_ejecucion_pivot_grupo_anio")
+        print("Sample: presupuesto.vw_ejecucion_pivot_grupo_anio (consolidado, en MILLONES)")
         print("=" * 80)
+        print(f"  {'grupo':40s}  {'2023':>10}  {'2024':>10}  {'2025':>10}")
         for r in con.execute("""
-            SELECT grupo, subgrupo, y2023, y2024, y2025, total
+            SELECT grupo,
+                   ROUND(y2023/1e6, 0) AS m23,
+                   ROUND(y2024/1e6, 0) AS m24,
+                   ROUND(y2025/1e6, 0) AS m25
             FROM presupuesto.vw_ejecucion_pivot_grupo_anio
-            ORDER BY ABS(total) DESC
-            LIMIT 12
+            ORDER BY grupo
         """).fetchall():
-            grp = (r[0] or "")[:35]
-            sub = (r[1] or "")[:18]
-            print(f"  {grp:35s} {sub:18s}  2023={r[2]:>16,.0f}  2024={r[3]:>16,.0f}  2025={r[4]:>16,.0f}")
+            grp = (r[0] or "")[:40]
+            print(f"  {grp:40s}  {r[1]:>10,.0f}  {r[2]:>10,.0f}  {r[3]:>10,.0f}")
 
         print("\n" + "=" * 80)
         print("Sample: presupuesto.vw_ejecucion_x_grupo_anio (2024, top 10)")

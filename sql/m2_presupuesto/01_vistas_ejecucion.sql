@@ -1,6 +1,8 @@
 -- Vistas base de Ejecucion Presupuestal por GRUPO
 -- Construidas sobre contabilidad.fact_ejecucion_clasificada.
--- WHERE grupo IS NOT NULL excluye movimientos sin clasificar (anios sin archivo de Grupos).
+-- Filtros estandar en todas las vistas:
+--   * grupo IS NOT NULL     - excluye movimientos sin clasificar (anios sin Grupos)
+--   * grupo != 'LQORDER'    - el grupo de liquidaciones siempre suma 0 (regla de negocio)
 
 ------------------------------------------------------------
 -- 1) Por anio: el agregado mas simple, util para tendencias
@@ -14,6 +16,7 @@ SELECT
     SUM(movimiento) AS valor_total
 FROM contabilidad.fact_ejecucion_clasificada
 WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
 GROUP BY anio, grupo, subgrupo;
 
 ------------------------------------------------------------
@@ -29,6 +32,7 @@ SELECT
     SUM(movimiento) AS valor_total
 FROM contabilidad.fact_ejecucion_clasificada
 WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
 GROUP BY anio, mes, grupo, subgrupo;
 
 ------------------------------------------------------------
@@ -45,6 +49,7 @@ SELECT
     SUM(movimiento) AS valor_total
 FROM contabilidad.fact_ejecucion_clasificada
 WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
 GROUP BY anio, grupo, subgrupo, tercero;
 
 ------------------------------------------------------------
@@ -61,6 +66,7 @@ SELECT
     SUM(movimiento) AS valor_total
 FROM contabilidad.fact_ejecucion_clasificada
 WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
 GROUP BY anio, grupo, subgrupo, cuenta;
 
 ------------------------------------------------------------
@@ -77,13 +83,14 @@ SELECT
     SUM(movimiento) AS valor_total
 FROM contabilidad.fact_ejecucion_clasificada
 WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
 GROUP BY anio, grupo, subgrupo, centro_de_responsabilidad;
 
 ------------------------------------------------------------
--- 6) Pivot Grupo x Anio: cada grupo en una fila, anios como columnas
---    (vista que alimenta el submodulo "Ejecucion x grupo y x anios")
+-- 6) Pivot Grupo + Subgrupo x Anio: una fila por (grupo, subgrupo)
+--    Util cuando se quiere el detalle dentro de cada grupo.
 ------------------------------------------------------------
-CREATE OR REPLACE VIEW presupuesto.vw_ejecucion_pivot_grupo_anio AS
+CREATE OR REPLACE VIEW presupuesto.vw_ejecucion_pivot_grupo_subgrupo_anio AS
 SELECT
     grupo,
     subgrupo,
@@ -99,5 +106,46 @@ SELECT
     SUM(movimiento)                                       AS total
 FROM contabilidad.fact_ejecucion_clasificada
 WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
 GROUP BY grupo, subgrupo
 ORDER BY grupo, subgrupo;
+
+------------------------------------------------------------
+-- 7) Pivot Grupo x Anio (consolidado): UNA fila por grupo,
+--    sumando todos los subgrupos. Vista principal para el
+--    submodulo "Ejecucion presupuestal x grupo y x anios".
+------------------------------------------------------------
+CREATE OR REPLACE VIEW presupuesto.vw_ejecucion_pivot_grupo_anio AS
+SELECT
+    grupo,
+    SUM(CASE WHEN anio = 2017 THEN movimiento ELSE 0 END) AS y2017,
+    SUM(CASE WHEN anio = 2018 THEN movimiento ELSE 0 END) AS y2018,
+    SUM(CASE WHEN anio = 2019 THEN movimiento ELSE 0 END) AS y2019,
+    SUM(CASE WHEN anio = 2020 THEN movimiento ELSE 0 END) AS y2020,
+    SUM(CASE WHEN anio = 2021 THEN movimiento ELSE 0 END) AS y2021,
+    SUM(CASE WHEN anio = 2022 THEN movimiento ELSE 0 END) AS y2022,
+    SUM(CASE WHEN anio = 2023 THEN movimiento ELSE 0 END) AS y2023,
+    SUM(CASE WHEN anio = 2024 THEN movimiento ELSE 0 END) AS y2024,
+    SUM(CASE WHEN anio = 2025 THEN movimiento ELSE 0 END) AS y2025,
+    SUM(movimiento)                                       AS total
+FROM contabilidad.fact_ejecucion_clasificada
+WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
+GROUP BY grupo
+ORDER BY grupo;
+
+------------------------------------------------------------
+-- 8) Consolidado x Grupo x Anio en formato largo (no pivot)
+--    Util para Power BI / pandas / graficar facilmente.
+------------------------------------------------------------
+CREATE OR REPLACE VIEW presupuesto.vw_ejecucion_x_grupo_consolidado AS
+SELECT
+    anio,
+    grupo,
+    COUNT(*)        AS n_movimientos,
+    SUM(movimiento) AS valor_total
+FROM contabilidad.fact_ejecucion_clasificada
+WHERE grupo IS NOT NULL
+  AND grupo != 'LQORDER'
+GROUP BY anio, grupo
+ORDER BY anio, grupo;
