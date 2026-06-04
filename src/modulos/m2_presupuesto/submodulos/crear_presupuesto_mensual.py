@@ -25,6 +25,8 @@ Metodo = Literal[
     "ejecucion_ultimo_anio",
     "promedio_2_anios",
     "promedio_3_anios",
+    "promedio_4_anios",
+    "promedio_5_anios",
     "valor_aprobado_anio_anterior",
 ]
 
@@ -32,7 +34,21 @@ N_ANIOS_POR_METODO: dict[str, int] = {
     "ejecucion_ultimo_anio": 1,
     "promedio_2_anios": 2,
     "promedio_3_anios": 3,
+    "promedio_4_anios": 4,
+    "promedio_5_anios": 5,
 }
+
+ETIQUETA_METODO: dict[str, str] = {
+    "ejecucion_ultimo_anio": "Ejecución año anterior",
+    "promedio_2_anios":      "Promedio últimos 2 años",
+    "promedio_3_anios":      "Promedio últimos 3 años",
+    "promedio_4_anios":      "Promedio últimos 4 años",
+    "promedio_5_anios":      "Promedio últimos 5 años",
+    "valor_aprobado_anio_anterior": "Valor año aprobado (manual)",
+}
+
+MESES_NOMBRES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 COLUMNAS_EXPORT = [
     "anio", "cuenta", "centro_de_responsabilidad",
@@ -163,3 +179,33 @@ def ruta_salida_default(anio_destino: int, metodo: str) -> Path:
     base = Path(cfg["fuentes"]["ruta_base"])
     carpeta = base / "datos" / "Estado de Resultado Presupuesto"
     return carpeta / f"presupuesto_{anio_destino}_{metodo}.xlsx"
+
+
+def pivot_mensual_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot: filas = grupo, columnas = Ene..Dic, valores = SUM(movimiento).
+
+    Devuelve DataFrame con columnas: grupo, Ene, Feb, ..., Dic, Total.
+    """
+    pivot = df.pivot_table(
+        index="grupo",
+        columns="mes",
+        values="movimiento",
+        aggfunc="sum",
+        fill_value=0.0,
+    )
+    for m in range(1, 13):
+        if m not in pivot.columns:
+            pivot[m] = 0.0
+    pivot = pivot[list(range(1, 13))]
+    pivot.columns = MESES_NOMBRES
+    pivot["Total"] = pivot.sum(axis=1)
+    return pivot.reset_index()
+
+
+def pivot_acumulado_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot acumulado mes a mes: cada celda = suma de meses 1..mes actual."""
+    mensual = pivot_mensual_por_grupo(df)
+    acum = mensual.copy()
+    for i in range(1, len(MESES_NOMBRES)):
+        acum[MESES_NOMBRES[i]] = acum[MESES_NOMBRES[i]] + acum[MESES_NOMBRES[i - 1]]
+    return acum

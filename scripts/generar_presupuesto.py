@@ -20,6 +20,8 @@ METODOS_CORTOS = {
     "anio_anterior": "ejecucion_ultimo_anio",
     "prom2":         "promedio_2_anios",
     "prom3":         "promedio_3_anios",
+    "prom4":         "promedio_4_anios",
+    "prom5":         "promedio_5_anios",
     "aprobado":      "valor_aprobado_anio_anterior",
 }
 
