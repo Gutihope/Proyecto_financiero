@@ -181,6 +181,23 @@ def ruta_salida_default(anio_destino: int, metodo: str) -> Path:
     return carpeta / f"presupuesto_{anio_destino}_{metodo}.xlsx"
 
 
+def listar_grupos() -> list[str]:
+    """Devuelve la lista de grupos unicos disponibles, excluyendo LQORDER y nulos."""
+    con = conectar(read_only=True)
+    try:
+        rows = con.execute(
+            """
+            SELECT DISTINCT grupo
+            FROM contabilidad.fact_ejecucion_clasificada
+            WHERE grupo IS NOT NULL AND grupo != 'LQORDER'
+            ORDER BY grupo
+            """
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
 def pivot_mensual_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
     """Pivot: filas = grupo, columnas = Ene..Dic, valores = SUM(movimiento).
 
