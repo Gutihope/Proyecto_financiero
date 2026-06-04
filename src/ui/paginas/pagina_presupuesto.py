@@ -34,13 +34,16 @@ class PaginaPresupuesto(QWidget):
         from src.ui.paginas.pagina_crear_presupuesto_mensual import (
             PaginaCrearPresupuestoMensual,
         )
+        from src.ui.paginas.pagina_ejecucion_presupuestal import (
+            PaginaEjecucionPresupuestal,
+        )
         from src.ui.paginas.pagina_placeholder import PaginaPlaceholder
 
         submodulos = [
             ("Crear presupuesto\nmensual", True, lambda: self.navegador.navegar_a(
                 PaginaCrearPresupuestoMensual(self.navegador))),
-            ("Ejecución\npresupuestal", False, lambda: self.navegador.navegar_a(
-                PaginaPlaceholder(self.navegador, "Ejecución presupuestal"))),
+            ("Ejecución\npresupuestal", True, lambda: self.navegador.navegar_a(
+                PaginaEjecucionPresupuestal(self.navegador))),
             ("Comparativo\npresupuesto vs ejecución", False, lambda: self.navegador.navegar_a(
                 PaginaPlaceholder(self.navegador, "Comparativo presupuesto vs ejecución"))),
             ("Variaciones y\nalertas", False, lambda: self.navegador.navegar_a(
