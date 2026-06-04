@@ -23,35 +23,141 @@ Pares (configurable en BONIF_MAPPING):
 
 (El ajuste NO se aplica en el submódulo de Crear presupuesto — solo aquí.)
 """
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from src.core.config import PROJECT_ROOT
 from src.core.db import conectar
 from src.modulos.m2_presupuesto.submodulos.crear_presupuesto_mensual import (
     _agregar_columna_clave,
 )
 
 
-def _agregar_variaciones(pivot: pd.DataFrame, anios: list[int]) -> pd.DataFrame:
-    """Inserta columnas de variacion entre anios consecutivos.
+def _obtener_presupuesto_por_anio(
+    anio: int,
+    mes_desde: int = 1,
+    mes_hasta: int = 12,
+) -> dict[str, dict[str, float]] | None:
+    """Lee data/aprobado_<anio>.json y calcula presupuesto anual y por periodo.
 
-    Por cada par (anio_n-1, anio_n) agrega DOS columnas DESPUES de anio_n:
-      - %Δ <prev>→<anio> : variacion porcentual = (|n| - |n-1|) / |n-1| * 100
-      - Δ <prev>→<anio>  : variacion absoluta   = |n| - |n-1|   (en pesos)
+    Returns dict[clave_aprobado, {'anual': pesos, 'periodo': pesos}] o None si
+    no existe el JSON o esta vacio.
 
-    Ambas usan MAGNITUDES (|x|), asi el signo refleja crecimiento real:
-    positivo si el ingreso/gasto aumento en valor absoluto, negativo si bajo.
+    El periodo se calcula prorrateando el aprobado anual con el patron de
+    ejecucion del anio anterior (anio-1). Si no hay datos, prorrateo lineal.
     """
-    if len(anios) < 2:
+    ruta = PROJECT_ROOT / "data" / f"aprobado_{anio}.json"
+    if not ruta.exists():
+        return None
+    try:
+        aprobado_millones = json.loads(ruta.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    aprobado_pesos = {k: float(v) * 1_000_000 for k, v in aprobado_millones.items()}
+    if not aprobado_pesos:
+        return None
+
+    patron_anio = anio - 1
+    con = conectar(read_only=True)
+    try:
+        df_patron = con.execute(
+            """
+            SELECT grupo, subgrupo, mes, SUM(movimiento) AS valor
+            FROM contabilidad.fact_ejecucion_clasificada
+            WHERE anio = ?
+              AND grupo IS NOT NULL AND grupo != 'LQORDER'
+            GROUP BY grupo, subgrupo, mes
+            """,
+            [patron_anio],
+        ).df()
+    finally:
+        con.close()
+
+    if df_patron.empty:
+        df_patron = pd.DataFrame(columns=["grupo", "subgrupo", "mes", "valor"])
+    else:
+        df_patron = _agregar_columna_clave(df_patron)
+        df_patron["valor_abs"] = df_patron["valor"].abs()
+
+    if not df_patron.empty:
+        suma_full = df_patron.groupby("__clave")["valor_abs"].sum()
+        suma_per = df_patron[
+            df_patron["mes"].between(mes_desde, mes_hasta)
+        ].groupby("__clave")["valor_abs"].sum()
+    else:
+        suma_full = pd.Series(dtype=float)
+        suma_per = pd.Series(dtype=float)
+
+    ratio_default = (mes_hasta - mes_desde + 1) / 12.0
+    out: dict[str, dict[str, float]] = {}
+    for clave, anual_pesos in aprobado_pesos.items():
+        full = float(suma_full.get(clave, 0.0))
+        periodo = float(suma_per.get(clave, 0.0))
+        ratio = periodo / full if full > 0 else ratio_default
+        out[clave] = {
+            "anual": float(anual_pesos),
+            "periodo": float(anual_pesos) * ratio,
+        }
+    return out
+
+
+def _agregar_variaciones(
+    pivot: pd.DataFrame,
+    anios: list[int],
+    presupuesto_por_anio: dict[int, dict] | None = None,
+    incluir_variaciones: bool = True,
+) -> pd.DataFrame:
+    """Inserta columnas calculadas (vs presupuesto + variaciones interanuales).
+
+    Por cada anio inserta, en este orden:
+      year_n
+      %Año <n>, %Mes <n>           (si presupuesto_por_anio[n] existe)
+      %Δ <prev>→<n>, Δ <prev>→<n>  (si i > 0 e incluir_variaciones)
+
+    Formulas (todas en magnitudes |x|):
+      %Año <n> = |ejec_n_periodo| / presupuesto_anual_n * 100
+      %Mes <n> = |ejec_n_periodo| / presupuesto_periodo_n * 100
+      %Δ      = (|n| - |n-1|) / |n-1| * 100
+      Δ        =  |n| - |n-1|
+    """
+    if not anios:
         return pivot
 
     pivot = pivot.copy()
     nuevas_cols = ["grupo"]
+
     for i, anio in enumerate(anios):
         nuevas_cols.append(anio)
-        if i > 0:
+
+        if presupuesto_por_anio and anio in presupuesto_por_anio:
+            preset = presupuesto_por_anio[anio]
+            col_pa = f"%Año {anio}"
+            col_pm = f"%Mes {anio}"
+            ejec_abs = pivot[anio].abs()
+            pres_anual = pivot["grupo"].map(
+                lambda k: preset.get(k, {}).get("anual")
+            )
+            pres_periodo = pivot["grupo"].map(
+                lambda k: preset.get(k, {}).get("periodo")
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pivot[col_pa] = np.where(
+                    pres_anual.notna() & (pres_anual > 0),
+                    ejec_abs / pres_anual * 100,
+                    np.nan,
+                )
+                pivot[col_pm] = np.where(
+                    pres_periodo.notna() & (pres_periodo > 0),
+                    ejec_abs / pres_periodo * 100,
+                    np.nan,
+                )
+            nuevas_cols.append(col_pa)
+            nuevas_cols.append(col_pm)
+
+        if i > 0 and incluir_variaciones:
             prev = anios[i - 1]
             col_pct = f"%Δ {prev}→{anio}"
             col_abs = f"Δ {prev}→{anio}"
@@ -102,6 +208,7 @@ def obtener_ejecucion_pivot(
     ajustar_bonificaciones: bool = True,
     factor_bonif: float = FACTOR_BONIF_DEFAULT,
     incluir_variaciones: bool = True,
+    incluir_vs_presupuesto: bool = False,
 ) -> pd.DataFrame:
     """Devuelve el pivot ejecución × año, con desagregado de 51 y 52.
 
@@ -185,8 +292,22 @@ def obtener_ejecucion_pivot(
     pivot["Total"] = pivot.sum(axis=1)
     pivot = pivot.sort_index().reset_index().rename(columns={"__clave": "grupo"})
 
-    if incluir_variaciones:
-        pivot = _agregar_variaciones(pivot, anios)
+    presupuesto_por_anio: dict[int, dict] | None = None
+    if incluir_vs_presupuesto:
+        presupuesto_por_anio = {}
+        for anio in anios:
+            data = _obtener_presupuesto_por_anio(anio, mes_desde, mes_hasta)
+            if data:
+                presupuesto_por_anio[anio] = data
+        if not presupuesto_por_anio:
+            presupuesto_por_anio = None
+
+    if incluir_variaciones or presupuesto_por_anio:
+        pivot = _agregar_variaciones(
+            pivot, anios,
+            presupuesto_por_anio=presupuesto_por_anio,
+            incluir_variaciones=incluir_variaciones,
+        )
     return pivot
 
 

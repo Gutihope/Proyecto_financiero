@@ -113,6 +113,28 @@ class PaginaEjecucionPresupuestal(QWidget):
         toggles_row.addStretch()
         layout.addLayout(toggles_row)
 
+        toggles_row2 = QHBoxLayout()
+        self.cb_variaciones = QCheckBox("Mostrar variaciones interanuales (%Δ y Δ)")
+        self.cb_variaciones.setChecked(True)
+        self.cb_variaciones.stateChanged.connect(self._refrescar)
+        toggles_row2.addWidget(self.cb_variaciones)
+
+        toggles_row2.addSpacing(24)
+        self.cb_vs_pres = QCheckBox("Mostrar % vs presupuesto (%Año / %Mes)")
+        self.cb_vs_pres.setChecked(False)
+        self.cb_vs_pres.setToolTip(
+            "Por cada año lee data/aprobado_<año>.json y agrega:\n"
+            "  %Año = ejec / presupuesto anual × 100\n"
+            "  %Mes = ejec / presupuesto del periodo filtrado × 100\n"
+            "El presupuesto del periodo prorratea el anual con el patrón\n"
+            "mensual del año anterior. Si no hay aprobado guardado, vacío."
+        )
+        self.cb_vs_pres.stateChanged.connect(self._refrescar)
+        toggles_row2.addWidget(self.cb_vs_pres)
+
+        toggles_row2.addStretch()
+        layout.addLayout(toggles_row2)
+
         self.tabla = QTableView()
         self.tabla.setAlternatingRowColors(True)
         self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
@@ -153,7 +175,8 @@ class PaginaEjecucionPresupuestal(QWidget):
                 mes_desde=mes_desde,
                 mes_hasta=mes_hasta,
                 ajustar_bonificaciones=self.cb_bonif.isChecked(),
-                incluir_variaciones=True,
+                incluir_variaciones=self.cb_variaciones.isChecked(),
+                incluir_vs_presupuesto=self.cb_vs_pres.isChecked(),
             )
         except Exception as e:
             QMessageBox.critical(self, "Error al consultar", str(e))
@@ -164,7 +187,7 @@ class PaginaEjecucionPresupuestal(QWidget):
         display = pivot.copy()
         sign = -1.0 if self.cb_pyg.isChecked() else 1.0
         pct_cols = [c for c in display.columns
-                    if isinstance(c, str) and c.startswith("%Δ")]
+                    if isinstance(c, str) and c.startswith("%")]
         delta_cols = [c for c in display.columns
                       if isinstance(c, str) and c.startswith("Δ ")]
         anio_cols = [c for c in display.columns
