@@ -19,6 +19,9 @@ data/*.db
 data/*.sqlite
 data/*.sqlite-journal
 
+# Datos personales del usuario (aprobados digitados manualmente)
+data/aprobado_*.json
+
 # Excel temporales y bloqueos
 ~$*.xlsx
 *.xlsx#
