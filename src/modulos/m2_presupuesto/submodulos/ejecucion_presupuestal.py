@@ -35,12 +35,14 @@ from src.modulos.m2_presupuesto.submodulos.crear_presupuesto_mensual import (
 
 
 def _agregar_variaciones(pivot: pd.DataFrame, anios: list[int]) -> pd.DataFrame:
-    """Inserta columnas de variacion porcentual entre anios consecutivos.
+    """Inserta columnas de variacion entre anios consecutivos.
 
-    Formula: variacion = (|val_n| - |val_(n-1)|) / |val_(n-1)| * 100
-    Asi el porcentaje refleja crecimiento de MAGNITUD: positivo si el
-    valor absoluto aumento (ingreso o gasto crecio), negativo si bajo.
-    Se inserta cada %delta entre el anio anterior y el actual.
+    Por cada par (anio_n-1, anio_n) agrega DOS columnas DESPUES de anio_n:
+      - %Δ <prev>→<anio> : variacion porcentual = (|n| - |n-1|) / |n-1| * 100
+      - Δ <prev>→<anio>  : variacion absoluta   = |n| - |n-1|   (en pesos)
+
+    Ambas usan MAGNITUDES (|x|), asi el signo refleja crecimiento real:
+    positivo si el ingreso/gasto aumento en valor absoluto, negativo si bajo.
     """
     if len(anios) < 2:
         return pivot
@@ -48,19 +50,22 @@ def _agregar_variaciones(pivot: pd.DataFrame, anios: list[int]) -> pd.DataFrame:
     pivot = pivot.copy()
     nuevas_cols = ["grupo"]
     for i, anio in enumerate(anios):
+        nuevas_cols.append(anio)
         if i > 0:
             prev = anios[i - 1]
-            col_var = f"%Δ {prev}→{anio}"
+            col_pct = f"%Δ {prev}→{anio}"
+            col_abs = f"Δ {prev}→{anio}"
             prev_abs = pivot[prev].abs()
+            curr_abs = pivot[anio].abs()
             with np.errstate(divide="ignore", invalid="ignore"):
-                vals = np.where(
+                pivot[col_pct] = np.where(
                     prev_abs > 0,
-                    (pivot[anio].abs() - prev_abs) / prev_abs * 100,
+                    (curr_abs - prev_abs) / prev_abs * 100,
                     np.nan,
                 )
-            pivot[col_var] = vals
-            nuevas_cols.append(col_var)
-        nuevas_cols.append(anio)
+            pivot[col_abs] = curr_abs - prev_abs
+            nuevas_cols.append(col_pct)
+            nuevas_cols.append(col_abs)
 
     if "Total" in pivot.columns:
         nuevas_cols.append("Total")

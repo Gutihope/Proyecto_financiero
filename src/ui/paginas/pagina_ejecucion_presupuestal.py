@@ -163,18 +163,27 @@ class PaginaEjecucionPresupuestal(QWidget):
 
         display = pivot.copy()
         sign = -1.0 if self.cb_pyg.isChecked() else 1.0
-        pct_cols = [c for c in display.columns if isinstance(c, str) and c.startswith("%Δ")]
-        anio_cols = [c for c in display.columns if c not in pct_cols and c != "grupo"]
+        pct_cols = [c for c in display.columns
+                    if isinstance(c, str) and c.startswith("%Δ")]
+        delta_cols = [c for c in display.columns
+                      if isinstance(c, str) and c.startswith("Δ ")]
+        anio_cols = [c for c in display.columns
+                     if c != "grupo" and c not in pct_cols and c not in delta_cols]
+
         for col in anio_cols:
             display[col] = display[col] * sign / 1e6
+        for col in delta_cols:
+            display[col] = display[col] / 1e6
 
         display.columns = [str(c) for c in display.columns]
         num_cols = {str(c) for c in anio_cols}
         pct_cols_s = {str(c) for c in pct_cols}
+        delta_cols_s = {str(c) for c in delta_cols}
         self.tabla.setModel(PandasModel(
             display,
             columnas_numericas=num_cols,
             columnas_porcentaje=pct_cols_s,
+            columnas_delta=delta_cols_s,
         ))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), 280))
