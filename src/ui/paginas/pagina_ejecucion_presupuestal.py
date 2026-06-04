@@ -11,8 +11,11 @@ from pathlib import Path
 import pandas as pd
 from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
-    QMessageBox, QPushButton, QTableView, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
 )
+
+MESES_CORTOS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 from src.modulos.m2_presupuesto.submodulos.ejecucion_presupuestal import (
     exportar_ejecucion_excel, listar_anios_disponibles, obtener_ejecucion_pivot,
@@ -58,6 +61,31 @@ class PaginaEjecucionPresupuestal(QWidget):
             year_row.addWidget(cb)
         year_row.addStretch()
         layout.addLayout(year_row)
+
+        mes_row = QHBoxLayout()
+        mes_row.addWidget(QLabel("Meses:"))
+        mes_row.addWidget(QLabel("Desde"))
+        self.spin_mes_desde = QSpinBox()
+        self.spin_mes_desde.setRange(1, 12)
+        self.spin_mes_desde.setValue(1)
+        self.spin_mes_desde.setFixedWidth(60)
+        self.spin_mes_desde.valueChanged.connect(self._refrescar)
+        mes_row.addWidget(self.spin_mes_desde)
+
+        mes_row.addWidget(QLabel("Hasta"))
+        self.spin_mes_hasta = QSpinBox()
+        self.spin_mes_hasta.setRange(1, 12)
+        self.spin_mes_hasta.setValue(12)
+        self.spin_mes_hasta.setFixedWidth(60)
+        self.spin_mes_hasta.valueChanged.connect(self._refrescar)
+        mes_row.addWidget(self.spin_mes_hasta)
+
+        self.lbl_meses = QLabel("(Ene–Dic)")
+        self.lbl_meses.setStyleSheet("color: #666;")
+        mes_row.addWidget(self.lbl_meses)
+
+        mes_row.addStretch()
+        layout.addLayout(mes_row)
 
         toggles_row = QHBoxLayout()
         self.cb_bonif = QCheckBox(
@@ -105,6 +133,14 @@ class PaginaEjecucionPresupuestal(QWidget):
 
     def _refrescar(self):
         anios = self._anios_seleccionados()
+        mes_desde = self.spin_mes_desde.value()
+        mes_hasta = self.spin_mes_hasta.value()
+        if mes_desde > mes_hasta:
+            mes_desde, mes_hasta = mes_hasta, mes_desde
+        self.lbl_meses.setText(
+            f"({MESES_CORTOS[mes_desde - 1]}–{MESES_CORTOS[mes_hasta - 1]})"
+        )
+
         if not anios:
             self.tabla.setModel(None)
             self.lbl_estado.setText("Selecciona al menos un año.")
@@ -114,7 +150,10 @@ class PaginaEjecucionPresupuestal(QWidget):
         try:
             pivot = obtener_ejecucion_pivot(
                 anios=anios,
+                mes_desde=mes_desde,
+                mes_hasta=mes_hasta,
                 ajustar_bonificaciones=self.cb_bonif.isChecked(),
+                incluir_variaciones=True,
             )
         except Exception as e:
             QMessageBox.critical(self, "Error al consultar", str(e))
@@ -124,21 +163,29 @@ class PaginaEjecucionPresupuestal(QWidget):
 
         display = pivot.copy()
         sign = -1.0 if self.cb_pyg.isChecked() else 1.0
-        anio_cols = [c for c in display.columns if c != "grupo"]
+        pct_cols = [c for c in display.columns if isinstance(c, str) and c.startswith("%Δ")]
+        anio_cols = [c for c in display.columns if c not in pct_cols and c != "grupo"]
         for col in anio_cols:
             display[col] = display[col] * sign / 1e6
 
         display.columns = [str(c) for c in display.columns]
         num_cols = {str(c) for c in anio_cols}
-        self.tabla.setModel(PandasModel(display, columnas_numericas=num_cols))
+        pct_cols_s = {str(c) for c in pct_cols}
+        self.tabla.setModel(PandasModel(
+            display,
+            columnas_numericas=num_cols,
+            columnas_porcentaje=pct_cols_s,
+        ))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(0, max(self.tabla.columnWidth(0), 280))
 
         bonif = "con ajuste bonif" if self.cb_bonif.isChecked() else "sin ajuste bonif"
         signo = "P&L" if self.cb_pyg.isChecked() else "contable"
+        periodo = (f"Año completo" if (mes_desde, mes_hasta) == (1, 12)
+                   else f"{MESES_CORTOS[mes_desde-1]}–{MESES_CORTOS[mes_hasta-1]}")
         self.lbl_estado.setText(
             f"{len(pivot)} grupos · Años: {', '.join(str(a) for a in anios)} · "
-            f"{bonif} · Signo {signo} · Valores en millones"
+            f"Período: {periodo} · {bonif} · Signo {signo} · Valores en millones"
         )
 
     def _on_exportar(self):

@@ -4,10 +4,16 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 
 class PandasModel(QAbstractTableModel):
-    def __init__(self, df: pd.DataFrame, columnas_numericas: set[str] | None = None):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        columnas_numericas: set[str] | None = None,
+        columnas_porcentaje: set[str] | None = None,
+    ):
         super().__init__()
         self._df = df
         self._num_cols = columnas_numericas or set()
+        self._pct_cols = columnas_porcentaje or set()
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._df)
@@ -23,7 +29,16 @@ class PandasModel(QAbstractTableModel):
         val = self._df.iloc[index.row(), index.column()]
 
         if role == Qt.DisplayRole:
+            if col_name in self._pct_cols:
+                if pd.isna(val):
+                    return ""
+                try:
+                    return f"{float(val):+,.1f}%"
+                except (TypeError, ValueError):
+                    return str(val)
             if col_name in self._num_cols:
+                if pd.isna(val):
+                    return ""
                 try:
                     return f"{float(val):,.0f}"
                 except (TypeError, ValueError):
@@ -31,9 +46,20 @@ class PandasModel(QAbstractTableModel):
             return "" if pd.isna(val) else str(val)
 
         if role == Qt.TextAlignmentRole:
-            if col_name in self._num_cols:
+            if col_name in self._num_cols or col_name in self._pct_cols:
                 return int(Qt.AlignRight | Qt.AlignVCenter)
             return int(Qt.AlignLeft | Qt.AlignVCenter)
+
+        if role == Qt.ForegroundRole and col_name in self._pct_cols:
+            try:
+                v = float(val)
+                if v > 0:
+                    return Qt.darkGreen
+                if v < 0:
+                    return Qt.darkRed
+            except (TypeError, ValueError):
+                return None
+            return None
 
         return None
 

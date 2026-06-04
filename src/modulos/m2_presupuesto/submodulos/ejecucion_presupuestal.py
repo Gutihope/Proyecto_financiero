@@ -25,12 +25,46 @@ Pares (configurable en BONIF_MAPPING):
 """
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from src.core.db import conectar
 from src.modulos.m2_presupuesto.submodulos.crear_presupuesto_mensual import (
     _agregar_columna_clave,
 )
+
+
+def _agregar_variaciones(pivot: pd.DataFrame, anios: list[int]) -> pd.DataFrame:
+    """Inserta columnas de variacion porcentual entre anios consecutivos.
+
+    Formula: variacion = (|val_n| - |val_(n-1)|) / |val_(n-1)| * 100
+    Asi el porcentaje refleja crecimiento de MAGNITUD: positivo si el
+    valor absoluto aumento (ingreso o gasto crecio), negativo si bajo.
+    Se inserta cada %delta entre el anio anterior y el actual.
+    """
+    if len(anios) < 2:
+        return pivot
+
+    pivot = pivot.copy()
+    nuevas_cols = ["grupo"]
+    for i, anio in enumerate(anios):
+        if i > 0:
+            prev = anios[i - 1]
+            col_var = f"%Δ {prev}→{anio}"
+            prev_abs = pivot[prev].abs()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                vals = np.where(
+                    prev_abs > 0,
+                    (pivot[anio].abs() - prev_abs) / prev_abs * 100,
+                    np.nan,
+                )
+            pivot[col_var] = vals
+            nuevas_cols.append(col_var)
+        nuevas_cols.append(anio)
+
+    if "Total" in pivot.columns:
+        nuevas_cols.append("Total")
+    return pivot[nuevas_cols]
 
 
 BONIF_MAPPING: dict[str, str] = {
@@ -58,16 +92,30 @@ def listar_anios_disponibles() -> list[int]:
 
 def obtener_ejecucion_pivot(
     anios: list[int],
+    mes_desde: int = 1,
+    mes_hasta: int = 12,
     ajustar_bonificaciones: bool = True,
     factor_bonif: float = FACTOR_BONIF_DEFAULT,
+    incluir_variaciones: bool = True,
 ) -> pd.DataFrame:
     """Devuelve el pivot ejecución × año, con desagregado de 51 y 52.
 
-    Columnas: grupo, <anio_1>, <anio_2>, ..., Total
-    Valores: en PESOS, con signo contable (raw).
+    - Filtra por rango de meses [mes_desde, mes_hasta] (ambos inclusive).
+    - Aplica el ajuste de bonificaciones (×factor_bonif) si se pide.
+    - Inserta columnas de %Δ entre anios consecutivos si incluir_variaciones.
+
+    Columnas: grupo, <anio1>, [%Δ a1→a2], <anio2>, ..., Total
+    Valores: PESOS con signo contable (raw). Las variaciones ya son porcentaje.
     """
     if not anios:
         return pd.DataFrame()
+
+    # Normalizar rango de meses
+    if mes_desde > mes_hasta:
+        mes_desde, mes_hasta = mes_hasta, mes_desde
+    mes_desde = max(1, min(12, mes_desde))
+    mes_hasta = max(1, min(12, mes_hasta))
+    anios = sorted(anios)
 
     con = conectar(read_only=True)
     try:
@@ -77,10 +125,11 @@ def obtener_ejecucion_pivot(
             SELECT grupo, subgrupo, anio, SUM(movimiento) AS valor
             FROM contabilidad.fact_ejecucion_clasificada
             WHERE anio IN ({ph_anios})
+              AND mes BETWEEN ? AND ?
               AND grupo IS NOT NULL AND grupo != 'LQORDER'
             GROUP BY grupo, subgrupo, anio
             """,
-            anios,
+            anios + [mes_desde, mes_hasta],
         ).df()
 
         if ajustar_bonificaciones:
@@ -92,10 +141,11 @@ def obtener_ejecucion_pivot(
                 FROM contabilidad.fact_ejecucion_clasificada
                 WHERE LOWER(nombre_cuenta) LIKE 'bonif%'
                   AND anio IN ({ph_anios})
+                  AND mes BETWEEN ? AND ?
                   AND grupo IN ({ph_grp})
                 GROUP BY grupo, anio
                 """,
-                anios + grupos_origen,
+                anios + [mes_desde, mes_hasta] + grupos_origen,
             ).df()
         else:
             df_bonif = pd.DataFrame(columns=["grupo", "anio", "bonif"])
@@ -129,6 +179,9 @@ def obtener_ejecucion_pivot(
 
     pivot["Total"] = pivot.sum(axis=1)
     pivot = pivot.sort_index().reset_index().rename(columns={"__clave": "grupo"})
+
+    if incluir_variaciones:
+        pivot = _agregar_variaciones(pivot, anios)
     return pivot
 
 
