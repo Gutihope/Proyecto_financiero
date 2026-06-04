@@ -1,0 +1,50 @@
+db:
+  ruta: "data/unicafam.duckdb"
+
+fuentes:
+  ruta_base: "C:/Users/alejandro.gutierrez/Downloads/Proyecto unicafam Modelo financiero"
+
+  dim:
+    centros_costos: "DIM/dim_centrosdecostos.xlsx"
+    cuenta_contable: "DIM/dim_cuentacontable.xlsx"
+    fecha:          "DIM/dim_fecha_dw_2001_2050.xlsx"
+    periodo:        "DIM/dim_periodo_contable_2001_2050.xlsx"
+    tercero:        "DIM/dim_tercero.xlsx"
+
+  contabilidad:
+    movimiento_glob: "datos/Estado resultado Movimiento contable/*.xlsx"
+
+  grupos_subgrupos:
+    archivos_glob: "datos/Estado de Resultado Grupos y Subgrupos/*.xlsx"
+    columnas_clave:
+      - "Cuenta"
+      - "Centro de Responsabilidad"
+      - "Tercero"
+      - "Comprobante"
+      - "Documento"
+      - "Referencia"
+      - "Mes"
+      - "Movimiento"
+      - "Fuente"
+
+  presupuesto:
+    archivos_glob: "datos/Estado de Resultado Presupuesto/*.xlsx"
+
+  estudiantes:
+    ruta_base: ""
+    archivos_glob: ""
+
+  tesoreria:
+    ruta_base: ""
+    archivos_glob: ""
+
+  espacios:
+    ruta_base: ""
+    archivos_glob: ""
+
+modulos:
+  m1_modelo_financiero:    { activo: true }
+  m2_presupuesto:          { activo: true }
+  m3_estudiantes:          { activo: false }
+  m4_contabilidad_tesoreria: { activo: false }
+  m5_espacios:             { activo: false }

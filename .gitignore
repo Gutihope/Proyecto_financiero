@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# DuckDB / SQLite (la BD se reconstruye desde Excel via ETL)
+data/*.duckdb
+data/*.duckdb.wal
+data/*.db
+data/*.sqlite
+data/*.sqlite-journal
+
+# Excel temporales y bloqueos
+~$*.xlsx
+*.xlsx#
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build / packaging
+build/
+dist/
+*.spec
