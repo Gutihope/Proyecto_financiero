@@ -16,10 +16,40 @@ asi una cuenta que solo existio un anio no se promedia con ceros artificiales.
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from src.core.config import cargar_config
 from src.core.db import conectar
+
+GRUPOS_DESAGREGADOS: set[str] = {"51. Personal", "52. Centralizados"}
+SEPARADOR_KEY = " · "
+
+
+def clave_aprobado(grupo: str, subgrupo: str | None) -> str:
+    """Genera la clave de aprobado para un (grupo, subgrupo).
+
+    Para grupos en GRUPOS_DESAGREGADOS la clave incluye el subgrupo,
+    porque el consejo aprueba esos sub-totales por separado.
+    """
+    if grupo in GRUPOS_DESAGREGADOS and subgrupo:
+        return f"{grupo}{SEPARADOR_KEY}{subgrupo}"
+    return grupo
+
+
+def _agregar_columna_clave(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if df.empty:
+        df["__clave"] = pd.Series([], dtype=str)
+        return df
+    es_desagregado = df["grupo"].isin(GRUPOS_DESAGREGADOS)
+    sub_safe = df["subgrupo"].fillna("")
+    df["__clave"] = np.where(
+        es_desagregado & (sub_safe != ""),
+        df["grupo"] + SEPARADOR_KEY + sub_safe,
+        df["grupo"],
+    )
+    return df
 
 Metodo = Literal[
     "ejecucion_ultimo_anio",
@@ -198,47 +228,84 @@ def listar_grupos() -> list[str]:
         con.close()
 
 
+def listar_keys_aprobado() -> list[tuple[str, str | None, str]]:
+    """Devuelve las claves para la tabla de aprobados.
+
+    Una fila por grupo, EXCEPTO los grupos en GRUPOS_DESAGREGADOS que se
+    abren en una fila por (grupo, subgrupo).
+
+    Returns: list of (grupo, subgrupo_or_None, clave_display).
+    """
+    con = conectar(read_only=True)
+    try:
+        rows = con.execute(
+            """
+            SELECT DISTINCT grupo, subgrupo
+            FROM contabilidad.fact_ejecucion_clasificada
+            WHERE grupo IS NOT NULL AND grupo != 'LQORDER'
+            ORDER BY grupo, subgrupo
+            """
+        ).fetchall()
+    finally:
+        con.close()
+
+    salida: list[tuple[str, str | None, str]] = []
+    grupos_vistos: set[str] = set()
+    for grupo, subgrupo in rows:
+        if grupo in GRUPOS_DESAGREGADOS:
+            salida.append((grupo, subgrupo, clave_aprobado(grupo, subgrupo)))
+        elif grupo not in grupos_vistos:
+            grupos_vistos.add(grupo)
+            salida.append((grupo, None, grupo))
+    return salida
+
+
 def mensualizar_aprobado(
     df_calculado: pd.DataFrame,
-    aprobado_por_grupo_pesos: dict[str, float],
+    aprobado_por_clave_pesos: dict[str, float],
 ) -> pd.DataFrame:
-    """Reescala movimientos por grupo para que coincidan con el aprobado anual.
+    """Reescala movimientos al nivel de la clave de aprobado para que cada
+    clave sume el valor aprobado anual digitado por el usuario.
 
-    Para cada grupo con valor aprobado:
-       factor = |aprobado_pesos| / |sum(movimiento_calculado)|
+    Clave = grupo (general) o "grupo · subgrupo" (para GRUPOS_DESAGREGADOS).
+
+    Formula por clave K:
+       factor = |aprobado_pesos_K| / |sum(movimiento_calculado_K)|
        movimiento_final = movimiento_calculado * factor   (preserva signo)
 
-    Grupos sin aprobado se dejan tal cual.
-    Grupos con calculado = 0 se ignoran (no se puede reescalar).
+    Claves sin aprobado se dejan tal cual.
     """
-    if not aprobado_por_grupo_pesos or df_calculado.empty:
+    if not aprobado_por_clave_pesos or df_calculado.empty:
         return df_calculado.copy()
 
-    df = df_calculado.copy()
-    totales_abs = df.groupby("grupo")["movimiento"].sum().abs()
+    df = _agregar_columna_clave(df_calculado)
+    totales_abs = df.groupby("__clave")["movimiento"].sum().abs()
 
     factores: dict[str, float] = {}
-    for grupo, aprobado in aprobado_por_grupo_pesos.items():
-        total_abs = totales_abs.get(grupo, 0)
+    for clave, aprobado in aprobado_por_clave_pesos.items():
+        total_abs = totales_abs.get(clave, 0)
         if total_abs == 0 or aprobado is None:
             continue
-        factores[grupo] = abs(float(aprobado)) / float(total_abs)
+        factores[clave] = abs(float(aprobado)) / float(total_abs)
 
     if not factores:
-        return df
+        return df.drop(columns="__clave")
 
-    df["__factor"] = df["grupo"].map(factores).fillna(1.0)
+    df["__factor"] = df["__clave"].map(factores).fillna(1.0)
     df["movimiento"] = df["movimiento"] * df["__factor"]
-    return df.drop(columns="__factor")
+    return df.drop(columns=["__clave", "__factor"])
 
 
-def pivot_mensual_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
-    """Pivot: filas = grupo, columnas = Ene..Dic, valores = SUM(movimiento).
+def pivot_mensual_por_grupo(df: pd.DataFrame, por_clave: bool = False) -> pd.DataFrame:
+    """Pivot: filas = grupo (o clave), columnas = Ene..Dic, valores = SUM(movimiento).
 
-    Devuelve DataFrame con columnas: grupo, Ene, Feb, ..., Dic, Total.
+    Si por_clave=True, agrupa por la clave de aprobado (que abre los grupos
+    en GRUPOS_DESAGREGADOS por subgrupo). Si no, agrupa por grupo plano.
     """
-    pivot = df.pivot_table(
-        index="grupo",
+    df_use = _agregar_columna_clave(df) if por_clave else df
+    col = "__clave" if por_clave else "grupo"
+    pivot = df_use.pivot_table(
+        index=col,
         columns="mes",
         values="movimiento",
         aggfunc="sum",
@@ -250,12 +317,15 @@ def pivot_mensual_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
     pivot = pivot[list(range(1, 13))]
     pivot.columns = MESES_NOMBRES
     pivot["Total"] = pivot.sum(axis=1)
-    return pivot.reset_index()
+    out = pivot.reset_index()
+    if col != "grupo":
+        out = out.rename(columns={col: "grupo"})
+    return out
 
 
-def pivot_acumulado_por_grupo(df: pd.DataFrame) -> pd.DataFrame:
-    """Pivot acumulado mes a mes: cada celda = suma de meses 1..mes actual."""
-    mensual = pivot_mensual_por_grupo(df)
+def pivot_acumulado_por_grupo(df: pd.DataFrame, por_clave: bool = False) -> pd.DataFrame:
+    """Pivot acumulado mes a mes (cada celda = suma de meses 1..mes actual)."""
+    mensual = pivot_mensual_por_grupo(df, por_clave=por_clave)
     acum = mensual.copy()
     for i in range(1, len(MESES_NOMBRES)):
         acum[MESES_NOMBRES[i]] = acum[MESES_NOMBRES[i]] + acum[MESES_NOMBRES[i - 1]]

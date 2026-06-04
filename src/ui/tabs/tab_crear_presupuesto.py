@@ -5,18 +5,22 @@ Layout:
   | Anio destino  Metodo  [Calcular]                        |
   | Vista: o Mensual  o Acumulada mensual                   |
   +-------------------------+-------------------------------+
-  | Grupo | Aprobado | Calc |  Pivot mensualizado           |
-  |       | (M, edit)| (M)  |  (Ene..Dic + Total)           |
+  | Grupo/Detalle | Aprob.M | Calc.M |  Pivot Ene..Dic+Tot |
+  | (1 fila por   |         |        |  (filas alineadas   |
+  | clave; abre   |         |        |   con la tabla izq) |
+  | 51. Personal  |         |        |                     |
+  | y 52. Central |         |        |                     |
+  | en subgrupos) |         |        |                     |
   +-------------------------+-------------------------------+
   | Status                  [Guardar aprobado] [Exportar]   |
   +---------------------------------------------------------+
 
-El Aprobado es ANUAL por grupo (en millones de pesos). El export y el pivot
-de la derecha reescalan cada movimiento del metodo de modo que el total
-del grupo coincida con el Aprobado digitado, preservando el signo. Grupos
-sin Aprobado quedan con el valor calculado tal cual.
+El "Aprobado año" es el valor anual que aprueba el consejo. Para los grupos
+51. Personal y 52. Centralizados se abre por subgrupo (Administrativo /
+Profesores y Cafam / Unicafam). El sistema mensualiza ese aprobado con la
+distribucion del metodo elegido, preservando el signo del calculado.
 
-Persistencia: data/aprobado_<anio>.json guarda los valores en millones.
+Persistencia: data/aprobado_<anio>.json (claves = display strings, valores = M).
 """
 import json
 from pathlib import Path
@@ -31,8 +35,9 @@ from PySide6.QtWidgets import (
 
 from src.core.config import PROJECT_ROOT
 from src.modulos.m2_presupuesto.submodulos.crear_presupuesto_mensual import (
-    ETIQUETA_METODO, MESES_NOMBRES,
-    exportar, generar, listar_grupos,
+    ETIQUETA_METODO, GRUPOS_DESAGREGADOS, MESES_NOMBRES,
+    _agregar_columna_clave,
+    exportar, generar, listar_keys_aprobado,
     mensualizar_aprobado,
     pivot_acumulado_por_grupo, pivot_mensual_por_grupo,
     ruta_salida_default,
@@ -61,6 +66,7 @@ class TabCrearPresupuesto(QWidget):
     def __init__(self):
         super().__init__()
         self._df_raw: pd.DataFrame | None = None
+        self._keys: list[str] = []  # clave de aprobado por fila de la tabla izquierda
         self._construir_ui()
         self._poblar_grupos()
         self._cargar_aprobado(self.spin_anio.value())
@@ -120,7 +126,7 @@ class TabCrearPresupuesto(QWidget):
         self.tabla_aprobado = QTableWidget()
         self.tabla_aprobado.setColumnCount(3)
         self.tabla_aprobado.setHorizontalHeaderLabels(
-            ["Grupo", "Aprobado año (M)", "Calculado (M)"]
+            ["Grupo / Detalle", "Aprobado año (M)", "Calculado (M)"]
         )
         self.tabla_aprobado.verticalHeader().setVisible(False)
         h = self.tabla_aprobado.horizontalHeader()
@@ -130,7 +136,7 @@ class TabCrearPresupuesto(QWidget):
         self.tabla_aprobado.setColumnWidth(COL_APROBADO, 130)
         self.tabla_aprobado.setColumnWidth(COL_CALCULADO, 130)
         self.tabla_aprobado.setAlternatingRowColors(True)
-        self.tabla_aprobado.setMinimumWidth(560)
+        self.tabla_aprobado.setMinimumWidth(580)
         self.tabla_aprobado.itemChanged.connect(self._on_aprobado_cambia)
         splitter.addWidget(self.tabla_aprobado)
 
@@ -142,7 +148,7 @@ class TabCrearPresupuesto(QWidget):
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([560, 1000])
+        splitter.setSizes([580, 1000])
         layout.addWidget(splitter, 1)
 
         # Estado + botones
@@ -161,19 +167,25 @@ class TabCrearPresupuesto(QWidget):
         bottom.addWidget(self.btn_exportar)
         layout.addLayout(bottom)
 
-    # ---------- Población de grupos ----------
+    # ---------- Población ----------
     def _poblar_grupos(self):
         try:
-            grupos = listar_grupos()
+            entradas = listar_keys_aprobado()
         except Exception as e:
             QMessageBox.critical(self, "Error al cargar grupos", str(e))
             return
 
+        self._keys = [k[2] for k in entradas]
+
         self.tabla_aprobado.blockSignals(True)
-        self.tabla_aprobado.setRowCount(len(grupos))
-        for i, g in enumerate(grupos):
-            item_g = QTableWidgetItem(g)
+        self.tabla_aprobado.setRowCount(len(entradas))
+        for i, (grupo, subgrupo, key) in enumerate(entradas):
+            item_g = QTableWidgetItem(key)
             item_g.setFlags(item_g.flags() & ~Qt.ItemIsEditable)
+            if grupo in GRUPOS_DESAGREGADOS:
+                font = item_g.font()
+                font.setItalic(True)
+                item_g.setFont(font)
             self.tabla_aprobado.setItem(i, COL_GRUPO, item_g)
 
             item_a = QTableWidgetItem("")
@@ -187,7 +199,7 @@ class TabCrearPresupuesto(QWidget):
             self.tabla_aprobado.setItem(i, COL_CALCULADO, item_c)
         self.tabla_aprobado.blockSignals(False)
 
-    # ---------- Persistencia aprobado ----------
+    # ---------- Persistencia ----------
     def _cargar_aprobado(self, anio: int):
         ruta = _ruta_aprobado(anio)
         self.tabla_aprobado.blockSignals(True)
@@ -202,9 +214,8 @@ class TabCrearPresupuesto(QWidget):
         except Exception:
             return
         self.tabla_aprobado.blockSignals(True)
-        for i in range(self.tabla_aprobado.rowCount()):
-            grupo = self.tabla_aprobado.item(i, COL_GRUPO).text()
-            valor = datos.get(grupo)
+        for i, key in enumerate(self._keys):
+            valor = datos.get(key)
             if valor is None:
                 continue
             self.tabla_aprobado.item(i, COL_APROBADO).setText(f"{float(valor):,.0f}")
@@ -212,54 +223,52 @@ class TabCrearPresupuesto(QWidget):
 
     def _leer_aprobado_millones(self) -> dict[str, float]:
         out: dict[str, float] = {}
-        for i in range(self.tabla_aprobado.rowCount()):
-            grupo = self.tabla_aprobado.item(i, COL_GRUPO).text()
+        for i, key in enumerate(self._keys):
             txt = self.tabla_aprobado.item(i, COL_APROBADO).text().strip().replace(",", "")
             if not txt:
                 continue
             try:
-                out[grupo] = float(txt)
+                out[key] = float(txt)
             except ValueError:
                 pass
         return out
 
     def _leer_aprobado_pesos(self) -> dict[str, float]:
-        return {g: v * 1_000_000 for g, v in self._leer_aprobado_millones().items()}
+        return {k: v * 1_000_000 for k, v in self._leer_aprobado_millones().items()}
 
     # ---------- Refresh ----------
     def _df_final(self) -> pd.DataFrame | None:
         if self._df_raw is None or self._df_raw.empty:
             return None
-        aprobado = self._leer_aprobado_pesos()
-        return mensualizar_aprobado(self._df_raw, aprobado)
+        return mensualizar_aprobado(self._df_raw, self._leer_aprobado_pesos())
 
     def _refrescar_pivot(self):
         df = self._df_final()
         if df is None:
             return
         pivot = (
-            pivot_mensual_por_grupo(df)
+            pivot_mensual_por_grupo(df, por_clave=True)
             if self.rb_mensual.isChecked()
-            else pivot_acumulado_por_grupo(df)
+            else pivot_acumulado_por_grupo(df, por_clave=True)
         )
         num_cols = set(MESES_NOMBRES) | {"Total"}
         self.tabla_pivot.setModel(PandasModel(pivot, columnas_numericas=num_cols))
         self.tabla_pivot.resizeColumnsToContents()
-        self.tabla_pivot.setColumnWidth(0, max(self.tabla_pivot.columnWidth(0), 240))
+        self.tabla_pivot.setColumnWidth(0, max(self.tabla_pivot.columnWidth(0), 260))
 
     def _refrescar_calculado_column(self):
+        self.tabla_aprobado.blockSignals(True)
         if self._df_raw is None or self._df_raw.empty:
-            self.tabla_aprobado.blockSignals(True)
             for i in range(self.tabla_aprobado.rowCount()):
                 self.tabla_aprobado.item(i, COL_CALCULADO).setText("")
-            self.tabla_aprobado.blockSignals(False)
-            return
-        totales = self._df_raw.groupby("grupo")["movimiento"].sum()
-        self.tabla_aprobado.blockSignals(True)
-        for i in range(self.tabla_aprobado.rowCount()):
-            grupo = self.tabla_aprobado.item(i, COL_GRUPO).text()
-            total = float(totales.get(grupo, 0.0))
-            self.tabla_aprobado.item(i, COL_CALCULADO).setText(f"{abs(total) / 1e6:,.0f}")
+        else:
+            df = _agregar_columna_clave(self._df_raw)
+            totales = df.groupby("__clave")["movimiento"].sum()
+            for i, key in enumerate(self._keys):
+                total = float(totales.get(key, 0.0))
+                self.tabla_aprobado.item(i, COL_CALCULADO).setText(
+                    f"{abs(total) / 1e6:,.0f}"
+                )
         self.tabla_aprobado.blockSignals(False)
 
     # ---------- Callbacks ----------
@@ -315,7 +324,7 @@ class TabCrearPresupuesto(QWidget):
         n_aprobados = len(self._leer_aprobado_millones())
         self.lbl_estado.setText(
             f"Generado {len(self._df_raw):,} filas · "
-            f"{n_aprobados} grupos con aprobado digitado · "
+            f"{n_aprobados} claves con aprobado digitado · "
             f"Total final: {total/1e6:,.0f} M"
         )
 
@@ -332,9 +341,9 @@ class TabCrearPresupuesto(QWidget):
             encoding="utf-8",
         )
         n = len(self._leer_aprobado_millones())
-        self.lbl_estado.setText(f"Aprobado {anio} guardado ({n} grupos) en {ruta.name}")
+        self.lbl_estado.setText(f"Aprobado {anio} guardado ({n} claves) en {ruta.name}")
         QMessageBox.information(self, "Guardado",
-                                f"Aprobado {anio} guardado ({n} grupos).")
+                                f"Aprobado {anio} guardado ({n} claves).")
 
     def _on_exportar(self):
         df = self._df_final()
@@ -353,9 +362,9 @@ class TabCrearPresupuesto(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error al exportar", str(e))
             return
-        n_aprobados = len(self._leer_aprobado_millones())
+        n_ap = len(self._leer_aprobado_millones())
         msg = f"Guardado: {ruta}\n\n{len(df):,} filas."
-        if n_aprobados:
-            msg += f"\n{n_aprobados} grupos mensualizados con aprobado digitado."
+        if n_ap:
+            msg += f"\n{n_ap} claves mensualizadas con aprobado digitado."
         QMessageBox.information(self, "Exportado", msg)
         self.lbl_estado.setText(f"Exportado: {ruta}")
