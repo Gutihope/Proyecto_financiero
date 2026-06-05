@@ -1,34 +1,31 @@
--- Vista que une cada movimiento contable con su Grupo/Subgrupo.
--- Es la base de todos los analisis del modulo de Presupuesto.
+-- Vista base de los analisis del modulo de Presupuesto.
+-- Une cada movimiento contable con su Grupo/Subgrupo via clave_grupo.
 --
--- Dos detalles criticos para que el excedente cuadre con el reporte
--- transformado del usuario:
+-- Reglas aplicadas AQUI (filtrado y normalizacion previa a toda metrica):
 --
--- 1) Dedup de stg_grupos_subgrupos:
+-- 1) Exclusion de LQORDE
+--    fuente LIKE 'LQORDE%' se excluye antes de cualquier calculo.
+--    Por regla de negocio, las liquidaciones de ordenes siempre suman
+--    cero (cada movimiento positivo tiene su contrapartida negativa) y
+--    no aportan informacion analitica.
+--
+-- 2) Dedup de stg_grupos_subgrupos
 --    El archivo Grupos&Subgrupos trae 191-332 filas duplicadas por anio
---    (misma clave, mismo grupo, repetidas). Sin SELECT DISTINCT el LEFT JOIN
---    multiplicaba los movimientos por la cantidad de duplicados. La regla
---    "una clave -> un grupo" la garantiza el SELECT DISTINCT.
+--    (misma clave, mismo grupo, repetidas). Sin SELECT DISTINCT el LEFT
+--    JOIN multiplicaba los movimientos. El DISTINCT garantiza una sola
+--    fila por (clave_grupo, anio).
 --
--- 2) Override por fuente LQORDE:
---    Regla de negocio: si fuente es LQORDE el grupo debe ser LQORDER
---    siempre, sin importar lo que diga el archivo de Grupos. Se aplica
---    como CASE de seguridad (aunque hoy la regla ya viene cumplida desde
---    el archivo de Grupos, asi se sostiene si cambian los datos).
+-- Despues de estas dos reglas, todas las queries downstream solo necesitan
+-- filtrar grupo IS NOT NULL (para excluir anios sin Grupos cargados).
 
 CREATE OR REPLACE VIEW contabilidad.fact_ejecucion_clasificada AS
 SELECT
     m.*,
-    CASE
-        WHEN UPPER(m.fuente) LIKE 'LQORDE%' THEN 'LQORDER'
-        ELSE g.grupo
-    END AS grupo,
-    CASE
-        WHEN UPPER(m.fuente) LIKE 'LQORDE%' THEN 'Lqorder'
-        ELSE g.subgrupo
-    END AS subgrupo
+    g.grupo,
+    g.subgrupo
 FROM contabilidad.fact_movimiento_contable m
 LEFT JOIN (
     SELECT DISTINCT id, anio_archivo, grupo, subgrupo
     FROM contabilidad.stg_grupos_subgrupos
-) g ON m.clave_grupo = g.id AND m.anio = g.anio_archivo;
+) g ON m.clave_grupo = g.id AND m.anio = g.anio_archivo
+WHERE UPPER(m.fuente) NOT LIKE 'LQORDE%';
