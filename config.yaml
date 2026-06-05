@@ -12,6 +12,7 @@ fuentes:
     tercero:        "DIM/dim_tercero.xlsx"
 
   contabilidad:
+    # Fuente original: Excel raw del aplicativo
     movimiento_glob: "datos/Estado resultado Movimiento contable/*.xlsx"
 
   grupos_subgrupos:

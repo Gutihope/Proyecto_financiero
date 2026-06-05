@@ -25,7 +25,7 @@ def main():
         banner("DIMENSIONES")
         cargar_dims(con)
 
-        banner("MOVIMIENTO CONTABLE")
+        banner("MOVIMIENTO CONTABLE (Excel raw del aplicativo)")
         cargar_movimiento_contable(con)
 
         banner("GRUPOS Y SUBGRUPOS")
