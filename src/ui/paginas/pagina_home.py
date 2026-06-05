@@ -35,10 +35,16 @@ class PaginaHome(QWidget):
         grid.setSpacing(16)
         grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
-        from src.ui.paginas.pagina_presupuesto import PaginaPresupuesto
+        from src.ui.paginas.pagina_estados_financieros import PaginaEstadosFinancieros
         from src.ui.paginas.pagina_placeholder import PaginaPlaceholder
+        from src.ui.paginas.pagina_presupuesto import PaginaPresupuesto
+        from src.ui.paginas.pagina_proyecciones_ml import PaginaProyeccionesML
 
         modulos = [
+            ("Estados Financieros\nde Prueba", True, lambda: self.navegador.navegar_a(
+                PaginaEstadosFinancieros(self.navegador))),
+            ("Proyecciones con\nMachine Learning", True, lambda: self.navegador.navegar_a(
+                PaginaProyeccionesML(self.navegador))),
             ("Modelo Financiero", False, lambda: self.navegador.navegar_a(
                 PaginaPlaceholder(self.navegador, "Modelo Financiero"))),
             ("Presupuesto", True, lambda: self.navegador.navegar_a(
