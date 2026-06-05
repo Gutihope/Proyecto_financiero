@@ -186,6 +186,49 @@ BONIF_MAPPING: dict[str, str] = {
 FACTOR_BONIF_DEFAULT = 1.52
 
 
+# Perspectivas de la Ejecucion Presupuestal.
+# Cada perspectiva filtra el pivot a un conjunto de claves (grupo o
+# "grupo · subgrupo"). La perspectiva 'Institucional' (None) muestra todo.
+PERSPECTIVAS: dict[str, list[str] | None] = {
+    "Fosfec Empresarial": [
+        "1. Ingresos FOSFEC Empresarial",
+        "11 Gastos FOSFEC Empresarial Personal",
+        "12. Gastos FOSFEC Empresarial",
+    ],
+    "Fosfec CEC": [
+        "2. Ingresos FOSFEC",
+        "21. Gastos Fosfec Personal",
+        "22. Gastos Fosfec CEC",
+    ],
+    "Extensión": [
+        "3. Ingresos Extensión y CEC",
+        "31. Gastos  Extensión y CEC Personal",
+        "32. Gastos  Extensión y CEC",
+    ],
+    "Posgrado": [
+        "4. Ingresos Posgrado",
+        "41. Gastos Posgrado Personal",
+        "42. Gastos Posgrados",
+    ],
+    "Ingresos Pregrado": [
+        "5. Ingresos Pregrado",
+    ],
+    "Centralizados Cafam": [
+        "52. Centralizados · Centralizados Cafam",
+    ],
+    "Centralizados Unicafam": [
+        "52. Centralizados · Centralizados Unicafam",
+    ],
+    "Generales": [
+        "55. Generales",
+    ],
+    "Mercadeo": [
+        "57. Publicidad y Mercadeo",
+    ],
+    "Institucional": None,
+}
+
+
 def listar_anios_disponibles() -> list[int]:
     """Devuelve los años que tienen datos clasificados por grupo."""
     con = conectar(read_only=True)
@@ -209,6 +252,7 @@ def obtener_ejecucion_pivot(
     factor_bonif: float = FACTOR_BONIF_DEFAULT,
     incluir_variaciones: bool = True,
     incluir_vs_presupuesto: bool = False,
+    claves_filter: list[str] | None = None,
 ) -> pd.DataFrame:
     """Devuelve el pivot ejecución × año, con desagregado de 51 y 52.
 
@@ -308,6 +352,11 @@ def obtener_ejecucion_pivot(
             presupuesto_por_anio=presupuesto_por_anio,
             incluir_variaciones=incluir_variaciones,
         )
+
+    # Filtrar a perspectiva (set de claves) antes de calcular el excedente,
+    # asi el excedente refleja la perspectiva, no el total institucional.
+    if claves_filter:
+        pivot = pivot[pivot["grupo"].isin(claves_filter)].reset_index(drop=True)
 
     pivot = _agregar_fila_excedente(pivot, anios)
     return pivot

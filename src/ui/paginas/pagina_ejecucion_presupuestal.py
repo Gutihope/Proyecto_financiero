@@ -25,11 +25,18 @@ from src.ui.widgets.navegacion import BarraNavegacion
 
 
 class PaginaEjecucionPresupuestal(QWidget):
-    def __init__(self, navegador):
+    def __init__(
+        self,
+        navegador,
+        claves_filter: list[str] | None = None,
+        titulo_perspectiva: str = "Institucional",
+    ):
         super().__init__()
         self.navegador = navegador
         self._pivot_actual: pd.DataFrame | None = None
         self._anio_checks: dict[int, QCheckBox] = {}
+        self._claves_filter = claves_filter
+        self._titulo_perspectiva = titulo_perspectiva
         self._construir_ui()
         self._refrescar()
 
@@ -39,7 +46,7 @@ class PaginaEjecucionPresupuestal(QWidget):
         layout.setSpacing(10)
 
         layout.addWidget(BarraNavegacion(
-            "Ejecución presupuestal",
+            f"Ejecución presupuestal · {self._titulo_perspectiva}",
             on_atras=self.navegador.volver,
             on_salir=self.navegador.salir,
         ))
@@ -177,6 +184,7 @@ class PaginaEjecucionPresupuestal(QWidget):
                 ajustar_bonificaciones=self.cb_bonif.isChecked(),
                 incluir_variaciones=self.cb_variaciones.isChecked(),
                 incluir_vs_presupuesto=self.cb_vs_pres.isChecked(),
+                claves_filter=self._claves_filter,
             )
         except Exception as e:
             QMessageBox.critical(self, "Error al consultar", str(e))
